@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chaossubs"
+version = "0.1.0"
+description = "Video subtitle extraction & Chinese translation"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Chaos0129", email = "lvzhechao@gmail.com"},
+]
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "python-multipart>=0.0.6",
+    "faster-whisper>=1.0.0",
+]
+
+[project.scripts]
+chaossubs = "cli:main"
+
+[tool.setuptools.package-data]
+"*" = ["static/*"]

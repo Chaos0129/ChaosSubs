@@ -7,17 +7,21 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <!-- Server disconnect banner -->
     <div id="disconnect-banner" class="disconnect-banner" hidden>
         服务已断开连接，请检查服务是否正在运行
     </div>
 
     <div class="container">
-        <h1>ChaosSubs</h1>
+        <h1 class="logo">ChaosSubs</h1>
         <p class="subtitle">视频字幕提取 & 中文翻译</p>
 
-        <!-- Upload Section -->
-        <div id="upload-section">
+        <div class="tabs">
+            <button class="tab active" data-tab="new">新建任务</button>
+            <button class="tab" data-tab="tasks">任务管理</button>
+        </div>
+
+        <!-- New Task Tab: Upload only -->
+        <div id="tab-new" class="tab-content active">
             <div id="drop-zone" class="drop-zone">
                 <div class="drop-icon">🎬</div>
                 <p>拖拽视频到这里，或点击选择文件</p>
@@ -37,81 +41,17 @@
                     <option value="auto">自动检测</option>
                 </select>
             </div>
-            <button id="upload-btn" class="btn-primary" disabled>开始处理</button>
+            <button id="upload-btn" class="btn-primary" hidden>提交任务</button>
         </div>
 
-        <!-- Progress Section -->
-        <div id="progress-section" hidden>
-            <div id="upload-success" class="upload-success">
-                <span class="check-icon">&#10003;</span>
-                <span id="upload-file-info">视频导入成功</span>
-            </div>
-
-            <div class="steps">
-                <div class="step" data-step="1">
-                    <div class="step-dot"></div>
-                    <span>提取音频</span>
-                </div>
-                <div class="step" data-step="2">
-                    <div class="step-dot"></div>
-                    <span>语音识别</span>
-                </div>
-                <div class="step" data-step="3">
-                    <div class="step-dot"></div>
-                    <span>翻译字幕</span>
-                </div>
-            </div>
-
-            <div class="progress-bar">
-                <div id="progress-fill" class="progress-fill"></div>
-            </div>
-
-            <div class="progress-details">
-                <p id="progress-step" class="progress-step">准备中...</p>
-                <div class="progress-stats">
-                    <span id="progress-pct" class="progress-pct">0%</span>
-                    <span id="progress-eta" class="progress-eta"></span>
-                </div>
-            </div>
-        </div>
-
-        <!-- Error Section -->
-        <div id="error-section" hidden>
-            <div class="error-box">
-                <p>处理出错</p>
-                <p id="error-msg"></p>
-            </div>
-            <button id="retry-btn" class="btn-primary">重新开始</button>
-        </div>
-
-        <!-- Done Section: Phase 1 complete -->
-        <div id="done-section" hidden>
-            <div class="success-box">
-                <p>字幕生成完成！</p>
-                <p class="success-hint">建议先下载字幕文件，用播放器预览效果，确认无误后再合成视频</p>
-            </div>
-
-            <div class="download-btns">
-                <a id="dl-original-srt" class="btn-secondary" download>下载原始字幕 (日文 SRT)</a>
-                <a id="dl-srt" class="btn-primary" download>下载中文字幕 (SRT)</a>
-            </div>
-
-            <div class="burn-section">
-                <div class="divider"><span>可选：合成视频</span></div>
-                <p class="burn-hint">将中文字幕烧录进视频（硬字幕，不可关闭）</p>
-                <button id="burn-btn" class="btn-secondary">合成带字幕视频</button>
-                <div id="burn-progress" class="burn-progress" hidden>
-                    <p id="burn-status-text">合成中，请稍候...</p>
-                </div>
-                <a id="dl-video" class="btn-primary" hidden download>下载带字幕视频 (MP4)</a>
-            </div>
-
-            <div class="divider"><span>任务管理</span></div>
-            <button id="cleanup-btn" class="btn-danger">结束任务并清理数据</button>
-            <button id="new-btn" class="btn-text">处理另一个视频（保留数据）</button>
+        <!-- Tasks Tab: All tasks live here -->
+        <div id="tab-tasks" class="tab-content">
+            <div id="job-list" class="job-list"></div>
         </div>
     </div>
 
+    <script src="/static/state.js"></script>
+    <script src="/static/view.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

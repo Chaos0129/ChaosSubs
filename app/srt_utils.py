@@ -12,6 +12,13 @@ class SrtEntry:
     text: str
 
 
+def srt_time_to_seconds(t: str) -> float:
+    """Convert SRT time format '00:01:23,456' to seconds."""
+    t = t.replace(",", ".")
+    parts = t.split(":")
+    return float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+
+
 def seconds_to_srt_time(s: float) -> str:
     hours = int(s // 3600)
     minutes = int((s % 3600) // 60)

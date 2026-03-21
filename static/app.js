@@ -1,342 +1,183 @@
-const dropZone = document.getElementById('drop-zone');
-const fileInput = document.getElementById('file-input');
-const fileInfo = document.getElementById('file-info');
-const fileName = document.getElementById('file-name');
-const clearBtn = document.getElementById('clear-btn');
-const uploadBtn = document.getElementById('upload-btn');
+/**
+ * ViewModel — Business logic, API, events.
+ */
+const ViewModel = (() => {
+    const _wsMap = {}; // jobId -> WebSocket
 
-const uploadSection = document.getElementById('upload-section');
-const progressSection = document.getElementById('progress-section');
-const errorSection = document.getElementById('error-section');
-const doneSection = document.getElementById('done-section');
+    const API = {
+        async upload(file, language) {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('language', language);
+            return (await fetch('/upload', { method: 'POST', body: fd })).json();
+        },
+        async listJobs() { return (await fetch('/jobs')).json(); },
+        async getJob(id) { return (await fetch(`/job/${id}`)).json(); },
+        async deleteJob(id) { await fetch(`/job/${id}`, { method: 'DELETE' }); },
+        async resumeJob(id) { return (await fetch(`/job/${id}/resume`, { method: 'POST' })).json(); },
+    };
 
-const progressFill = document.getElementById('progress-fill');
-const progressStep = document.getElementById('progress-step');
-const progressPct = document.getElementById('progress-pct');
-const progressEta = document.getElementById('progress-eta');
-const uploadFileInfo = document.getElementById('upload-file-info');
-const errorMsg = document.getElementById('error-msg');
+    // ===== Actions =====
 
-let selectedFile = null;
-let currentJobId = null;
+    function switchTab(tab) {
+        State.set('currentTab', tab);
+        if (tab === 'tasks') loadJobs();
+    }
 
-// ===== Server health check (every 5s) =====
-const disconnectBanner = document.getElementById('disconnect-banner');
-let serverOnline = true;
+    function selectFile(file) { State.set('selectedFile', file); }
 
-setInterval(async () => {
-    try {
-        const resp = await fetch('/health', { signal: AbortSignal.timeout(3000) });
-        if (resp.ok && !serverOnline) {
-            serverOnline = true;
-            disconnectBanner.hidden = true;
-        }
-    } catch {
-        if (serverOnline) {
-            serverOnline = false;
-            disconnectBanner.hidden = false;
+    function clearFile() {
+        State.set('selectedFile', null);
+        View.els.fileInput.value = '';
+    }
+
+    async function submitTask() {
+        const file = State.get('selectedFile');
+        if (!file) return;
+
+        State.set('uploading', true);
+        const lang = document.getElementById('source-lang').value;
+
+        try {
+            const data = await API.upload(file, lang);
+            State.set('uploading', false);
+
+            if (data.error) {
+                alert('上传失败: ' + data.error);
+                return;
+            }
+
+            // Reset upload form
+            State.set('selectedFile', null);
+            View.els.fileInput.value = '';
+
+            // Switch to tasks tab
+            switchTab('tasks');
+
+        } catch (e) {
+            State.set('uploading', false);
+            alert('上传失败: ' + e.message);
         }
     }
-}, 5000);
 
-// ===== Restore from localStorage on page load =====
-// Deferred to end of file so resetUI is available
+    async function loadJobs() {
+        const jobs = await API.listJobs();
+        State.set('jobList', jobs);
 
-// ===== File selection =====
-dropZone.addEventListener('click', () => fileInput.click());
-
-dropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    dropZone.classList.add('dragover');
-});
-
-dropZone.addEventListener('dragleave', () => {
-    dropZone.classList.remove('dragover');
-});
-
-dropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('dragover');
-    if (e.dataTransfer.files.length) {
-        selectFile(e.dataTransfer.files[0]);
-    }
-});
-
-fileInput.addEventListener('change', () => {
-    if (fileInput.files.length) {
-        selectFile(fileInput.files[0]);
-    }
-});
-
-clearBtn.addEventListener('click', () => {
-    selectedFile = null;
-    fileInfo.hidden = true;
-    dropZone.hidden = false;
-    uploadBtn.disabled = true;
-    fileInput.value = '';
-});
-
-function selectFile(file) {
-    selectedFile = file;
-    fileName.textContent = `${file.name} (${formatSize(file.size)})`;
-    fileInfo.hidden = false;
-    dropZone.hidden = true;
-    uploadBtn.disabled = false;
-}
-
-function formatSize(bytes) {
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
-}
-
-function formatEta(seconds) {
-    if (seconds < 0) return '预估时间计算中...';
-    if (seconds < 60) return `预计剩余 ${seconds} 秒`;
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    if (mins < 60) return `预计剩余 ${mins} 分 ${secs} 秒`;
-    const hours = Math.floor(mins / 60);
-    const remainMins = mins % 60;
-    return `预计剩余 ${hours} 小时 ${remainMins} 分`;
-}
-
-// ===== Upload =====
-uploadBtn.addEventListener('click', async () => {
-    if (!selectedFile) return;
-
-    uploadBtn.disabled = true;
-    uploadBtn.textContent = '上传中...';
-
-    const lang = document.getElementById('source-lang').value;
-
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('language', lang);
-
-    try {
-        const resp = await fetch('/upload', { method: 'POST', body: formData });
-        const data = await resp.json();
-
-        if (data.error) {
-            showError(data.error);
-            return;
-        }
-
-        currentJobId = data.job_id;
-        localStorage.setItem('chaossubs_job_id', currentJobId);
-        uploadFileInfo.textContent = `视频导入成功 — ${selectedFile.name} (${formatSize(selectedFile.size)})`;
-        showSection('progress');
-        connectWebSocket(currentJobId);
-    } catch (e) {
-        showError('上传失败: ' + e.message);
-    }
-});
-
-// ===== WebSocket progress (Phase 1) =====
-function connectWebSocket(jobId) {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${location.host}/ws/${jobId}`);
-
-    ws.onmessage = (event) => {
-        const job = JSON.parse(event.data);
-
-        if (job.error && job.status === 'error') {
-            showError(job.error);
-            return;
-        }
-
-        if (job.status === 'done' && !job.burn_status) {
-            showSection('done');
-            document.getElementById('dl-original-srt').href = `/download/${jobId}/original-srt`;
-            document.getElementById('dl-srt').href = `/download/${jobId}/srt`;
-            document.getElementById('dl-video').href = `/download/${jobId}/video`;
-            return;
-        }
-
-        // Update steps UI
-        const steps = document.querySelectorAll('.step');
-        steps.forEach((el) => {
-            const s = parseInt(el.dataset.step);
-            el.classList.remove('active', 'done');
-            if (s < job.step) el.classList.add('done');
-            else if (s === job.step) el.classList.add('active');
+        // Connect WebSocket for any processing jobs
+        jobs.forEach(job => {
+            if (job.status === 'processing' && !_wsMap[job.job_id]) {
+                connectJobWs(job.job_id);
+            }
         });
-
-        // Overall progress
-        const overall = job.overall_progress || 0;
-        progressFill.style.width = Math.min(100, overall) + '%';
-        progressPct.textContent = overall + '%';
-        progressStep.textContent = job.step_name || '处理中...';
-
-        if (job.eta_seconds !== undefined) {
-            progressEta.textContent = formatEta(job.eta_seconds);
-        }
-    };
-
-    ws.onerror = () => showError('连接中断');
-    ws.onclose = () => {};
-}
-
-// ===== Burn subtitles (Phase 2) =====
-document.getElementById('burn-btn').addEventListener('click', async () => {
-    if (!currentJobId) return;
-
-    const burnBtn = document.getElementById('burn-btn');
-    const burnProgress = document.getElementById('burn-progress');
-    const burnStatusText = document.getElementById('burn-status-text');
-
-    burnBtn.disabled = true;
-    burnBtn.textContent = '合成中...';
-    burnProgress.hidden = false;
-
-    try {
-        const resp = await fetch(`/burn/${currentJobId}`, { method: 'POST' });
-        const data = await resp.json();
-
-        if (data.error) {
-            burnStatusText.textContent = '合成失败: ' + data.error;
-            burnBtn.disabled = false;
-            burnBtn.textContent = '重试合成';
-            return;
-        }
-
-        pollBurnStatus(currentJobId, burnBtn, burnProgress, burnStatusText);
-    } catch (e) {
-        burnStatusText.textContent = '合成失败: ' + e.message;
-        burnBtn.disabled = false;
-        burnBtn.textContent = '重试合成';
     }
-});
 
-function pollBurnStatus(jobId, burnBtn, burnProgress, burnStatusText) {
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${location.host}/ws/${jobId}`);
+    function connectJobWs(jobId) {
+        if (_wsMap[jobId]) { try { _wsMap[jobId].close(); } catch {} }
 
-    ws.onmessage = (event) => {
-        const job = JSON.parse(event.data);
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${protocol}//${location.host}/ws/${jobId}`);
+        _wsMap[jobId] = ws;
 
-        if (job.burn_status === 'done') {
-            burnProgress.hidden = true;
-            burnBtn.hidden = true;
-            document.getElementById('dl-video').hidden = false;
-            ws.close();
-            return;
+        ws.onmessage = (event) => {
+            const job = JSON.parse(event.data);
+
+            // Build card data
+            const cardData = {
+                job_id: jobId,
+                display_name: job.file_name ? `${job.file_name.replace(/\.[^.]+$/, '')} (${jobId})` : jobId,
+                status: job.status === 'done' ? 'completed' : (job.status || 'queuing'),
+                created_at: job.created_at,
+                step: job.current_step,
+                step_name: job.step_name,
+                overall_progress: job.overall_progress,
+                eta_seconds: job.eta_seconds,
+                error: job.error,
+                current_stage: job.current_stage,
+                steps: job.steps || {},
+            };
+
+            View.updateJobCard(jobId, cardData);
+
+            if (job.status === 'done' || job.status === 'error') {
+                delete _wsMap[jobId];
+                // Reload full list to get accurate state
+                setTimeout(loadJobs, 500);
+            }
+        };
+
+        ws.onerror = () => { delete _wsMap[jobId]; };
+        ws.onclose = () => { delete _wsMap[jobId]; };
+    }
+
+    async function deleteJob(jobId) {
+        if (!confirm('确认删除此任务及所有数据？')) return;
+        await API.deleteJob(jobId);
+        loadJobs();
+    }
+
+    async function resumeJob(jobId) {
+        const data = await API.resumeJob(jobId);
+        if (data.error) { alert('恢复失败: ' + data.error); return; }
+        loadJobs();
+    }
+
+    function startHealthCheck() {
+        setInterval(async () => {
+            try {
+                await fetch('/health', { signal: AbortSignal.timeout(3000) });
+                State.set('serverOnline', true);
+            } catch { State.set('serverOnline', false); }
+        }, 15000);
+    }
+
+    return { switchTab, selectFile, clearFile, submitTask, loadJobs, deleteJob, resumeJob, startHealthCheck };
+})();
+
+
+// ===== Init =====
+(function init() {
+    View.init();
+
+    // Tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => ViewModel.switchTab(tab.dataset.tab));
+    });
+
+    // File selection
+    View.els.dropZone.addEventListener('click', () => View.els.fileInput.click());
+    View.els.dropZone.addEventListener('dragover', e => { e.preventDefault(); View.els.dropZone.classList.add('dragover'); });
+    View.els.dropZone.addEventListener('dragleave', () => View.els.dropZone.classList.remove('dragover'));
+    View.els.dropZone.addEventListener('drop', e => {
+        e.preventDefault();
+        View.els.dropZone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) ViewModel.selectFile(e.dataTransfer.files[0]);
+    });
+    View.els.fileInput.addEventListener('change', () => {
+        if (View.els.fileInput.files.length) ViewModel.selectFile(View.els.fileInput.files[0]);
+    });
+    document.getElementById('clear-btn').addEventListener('click', ViewModel.clearFile);
+
+    // Upload
+    View.els.uploadBtn.addEventListener('click', ViewModel.submitTask);
+
+    // Job list actions (event delegation)
+    document.getElementById('job-list').addEventListener('click', e => {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const { action, id } = btn.dataset;
+        if (action === 'delete') ViewModel.deleteJob(id);
+        else if (action === 'resume') ViewModel.resumeJob(id);
+    });
+
+    // Health check
+    ViewModel.startHealthCheck();
+
+    // Auto-load tasks tab if there are running jobs
+    ViewModel.loadJobs().then(() => {
+        const jobs = State.get('jobList');
+        if (jobs && jobs.some(j => j.status === 'processing')) {
+            ViewModel.switchTab('tasks');
         }
-
-        if (job.burn_status === 'error') {
-            burnStatusText.textContent = '合成失败: ' + (job.burn_error || '未知错误');
-            burnBtn.disabled = false;
-            burnBtn.textContent = '重试合成';
-            ws.close();
-            return;
-        }
-
-        burnStatusText.textContent = '合成中，请稍候...';
-    };
-
-    ws.onerror = () => {
-        burnStatusText.textContent = '连接中断';
-    };
-}
-
-// ===== Section switching =====
-function showSection(name) {
-    uploadSection.hidden = name !== 'upload';
-    progressSection.hidden = name !== 'progress';
-    errorSection.hidden = name !== 'error';
-    doneSection.hidden = name !== 'done';
-}
-
-function showError(msg) {
-    errorMsg.textContent = msg;
-    showSection('error');
-}
-
-// ===== Retry / New =====
-document.getElementById('retry-btn').addEventListener('click', resetUI);
-document.getElementById('new-btn').addEventListener('click', resetUI);
-
-document.getElementById('cleanup-btn').addEventListener('click', async () => {
-    if (!currentJobId) { resetUI(); return; }
-    try {
-        await fetch(`/job/${currentJobId}`, { method: 'DELETE' });
-    } catch {}
-    resetUI();
-});
-
-function resetUI() {
-    selectedFile = null;
-    currentJobId = null;
-    localStorage.removeItem('chaossubs_job_id');
-    fileInput.value = '';
-    fileInfo.hidden = true;
-    dropZone.hidden = false;
-    uploadBtn.disabled = true;
-    uploadBtn.textContent = '开始处理';
-    progressFill.style.width = '0%';
-    progressPct.textContent = '0%';
-    progressStep.textContent = '准备中...';
-    progressEta.textContent = '';
-    document.querySelectorAll('.step').forEach(el => el.classList.remove('active', 'done'));
-
-    // Reset burn state
-    const burnBtn = document.getElementById('burn-btn');
-    burnBtn.hidden = false;
-    burnBtn.disabled = false;
-    burnBtn.textContent = '合成带字幕视频';
-    document.getElementById('burn-progress').hidden = true;
-    document.getElementById('dl-video').hidden = true;
-
-    showSection('upload');
-}
-
-// ===== Restore job from localStorage =====
-(function restoreJob() {
-    const savedJobId = localStorage.getItem('chaossubs_job_id');
-    if (!savedJobId) return;
-
-    fetch(`/job/${savedJobId}`)
-        .then(r => r.json())
-        .then(job => {
-            if (job.error) {
-                localStorage.removeItem('chaossubs_job_id');
-                resetUI();
-                return;
-            }
-
-            currentJobId = savedJobId;
-
-            if (job.status === 'done') {
-                if (job.file_name) {
-                    uploadFileInfo.textContent = `视频导入成功 — ${job.file_name}`;
-                }
-                showSection('done');
-                document.getElementById('dl-original-srt').href = `/download/${savedJobId}/original-srt`;
-                document.getElementById('dl-srt').href = `/download/${savedJobId}/srt`;
-                document.getElementById('dl-video').href = `/download/${savedJobId}/video`;
-
-                if (job.burn_status === 'done') {
-                    document.getElementById('burn-btn').hidden = true;
-                    document.getElementById('dl-video').hidden = false;
-                }
-                return;
-            }
-
-            if (job.status === 'error') {
-                showError(job.error || '处理失败');
-                return;
-            }
-
-            // Still processing — reconnect WebSocket
-            if (job.file_name) {
-                uploadFileInfo.textContent = `视频导入成功 — ${job.file_name}`;
-            }
-            showSection('progress');
-            connectWebSocket(savedJobId);
-        })
-        .catch(() => {
-            localStorage.removeItem('chaossubs_job_id');
-            resetUI();
-        });
+    });
 })();

@@ -12,7 +12,7 @@ from app.scheduler import StepStatus, get_step_lock, get_step_name, GLOBAL_TASK_
 
 BATCH_SIZE = 10
 TOTAL_STEPS = 5
-STEP_WEIGHTS = {1: 5, 2: 35, 3: 5, 4: 35, 5: 20}
+STEP_WEIGHTS = {1: 2, 2: 30, 3: 2, 4: 35, 5: 31}
 WHISPER_SPEED_RATIO = 1.5
 
 
@@ -28,7 +28,14 @@ def _set_step(job_id: str, step: int, status: StepStatus, **extra):
     """Update a step's status and recalculate overall progress."""
     if job_id not in jobs:
         return
-    jobs[job_id]["steps"][step]["status"] = status
+    now = time.time()
+    step_data = jobs[job_id]["steps"][step]
+    step_data["status"] = status
+    if status == StepStatus.RUNNING and "started_at" not in step_data:
+        step_data["started_at"] = now
+    if status == StepStatus.DONE and "started_at" in step_data:
+        step_data["finished_at"] = now
+        step_data["duration"] = round(now - step_data["started_at"], 1)
     jobs[job_id]["current_step"] = step
     jobs[job_id]["step_name"] = f"{get_step_name(step)} — {_status_label(status)}"
 
